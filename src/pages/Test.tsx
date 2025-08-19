@@ -1,243 +1,264 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Brain, Send, Loader2, AlertTriangle, CheckCircle, Clock } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { CheckCircle, XCircle, AlertCircle, Loader2, Search, Brain } from "lucide-react";
+import Navigation from "@/components/Navigation";
+import Footer from "@/components/Footer";
+import { supabase } from "@/integrations/supabase/client";
+import { z } from "zod";
+
+const AnalysisStepSchema = z.object({
+  step_number: z.number(),
+  title: z.string(),
+  verdict: z.enum(["accurate", "partially_accurate", "inaccurate", "unclear"]),
+  explanation: z.string(),
+  issues_found: z.array(z.string()),
+  suggested_correction: z.string().optional()
+});
+
+const AnalysisResultSchema = z.object({
+  overall_verdict: z.enum(["accurate", "partially_accurate", "inaccurate"]),
+  confidence_score: z.number().min(0).max(100),
+  analysis_steps: z.array(AnalysisStepSchema),
+  summary: z.string(),
+  educational_reliability: z.enum(["high", "medium", "low"])
+});
+
+type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
 
 const Test = () => {
-  const [question, setQuestion] = useState("");
-  const [aiResponse, setAiResponse] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [accuracyNotes, setAccuracyNotes] = useState("");
-  const [accuracyRating, setAccuracyRating] = useState<number | null>(null);
-  const { toast } = useToast();
+  const [content, setContent] = useState("");
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleSubmitQuestion = async () => {
-    if (!question.trim()) {
-      toast({
-        title: "Error",
-        description: "Please enter a question to test.",
-        variant: "destructive",
-      });
-      return;
-    }
+  const handleAnalyzeContent = async () => {
+    if (!content.trim()) return;
 
-    setIsLoading(true);
+    setLoading(true);
+    setError("");
+    setAnalysisResult(null);
     
-    // Simulate AI response for now
-    setTimeout(() => {
-      setAiResponse(
-        "The Earth is the third planet from the Sun and the only known planet in the universe with life. It has a diameter of approximately 12,742 kilometers and is composed of 71% water and 29% land. The Earth's atmosphere consists of 78% nitrogen, 21% oxygen, and trace amounts of other gases. The planet formed approximately 4.5 billion years ago through accretion from the solar nebula."
-      );
-      setIsLoading(false);
-    }, 2000);
-  };
-
-  const handleAccuracyRating = (rating: number) => {
-    setAccuracyRating(rating);
-  };
-
-  const handleSaveResults = () => {
-    if (accuracyRating === null) {
-      toast({
-        title: "Rating Required",
-        description: "Please rate the accuracy before saving results.",
-        variant: "destructive",
+    try {
+      const { data, error: functionError } = await supabase.functions.invoke('analyze-content', {
+        body: { content }
       });
-      return;
+
+      if (functionError) {
+        throw functionError;
+      }
+
+      const validatedResult = AnalysisResultSchema.parse(data);
+      setAnalysisResult(validatedResult);
+    } catch (err) {
+      console.error('Analysis error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to analyze content');
+    } finally {
+      setLoading(false);
     }
-
-    toast({
-      title: "Results Saved",
-      description: "Your accuracy assessment has been recorded for analysis.",
-    });
-
-    // Reset form
-    setQuestion("");
-    setAiResponse("");
-    setAccuracyNotes("");
-    setAccuracyRating(null);
   };
 
-  const accuracyOptions = [
-    { value: 5, label: "Completely Accurate", color: "success", icon: CheckCircle },
-    { value: 4, label: "Mostly Accurate", color: "success", icon: CheckCircle },
-    { value: 3, label: "Partially Accurate", color: "warning", icon: Clock },
-    { value: 2, label: "Mostly Inaccurate", color: "destructive", icon: AlertTriangle },
-    { value: 1, label: "Completely Inaccurate", color: "destructive", icon: AlertTriangle },
-  ];
+  const getVerdictIcon = (verdict: string) => {
+    switch (verdict) {
+      case "accurate":
+        return <CheckCircle className="h-5 w-5 text-green-600" />;
+      case "partially_accurate":
+        return <AlertCircle className="h-5 w-5 text-yellow-600" />;
+      case "inaccurate":
+        return <XCircle className="h-5 w-5 text-red-600" />;
+      default:
+        return <AlertCircle className="h-5 w-5 text-gray-600" />;
+    }
+  };
+
+  const getVerdictColor = (verdict: string) => {
+    switch (verdict) {
+      case "accurate":
+        return "bg-green-50 border-green-200 text-green-800";
+      case "partially_accurate":
+        return "bg-yellow-50 border-yellow-200 text-yellow-800";
+      case "inaccurate":
+        return "bg-red-50 border-red-200 text-red-800";
+      default:
+        return "bg-gray-50 border-gray-200 text-gray-800";
+    }
+  };
 
   return (
-    <div className="container mx-auto px-4 py-8 space-y-8">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="text-center space-y-4"
-      >
-        <h1 className="text-4xl font-bold bg-gradient-to-r from-primary to-primary-light bg-clip-text text-transparent">
-          AI Accuracy Testing
-        </h1>
-        <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          Submit educational questions to test AI response accuracy and contribute to our research.
-        </p>
-      </motion.div>
+    <div className="min-h-screen bg-background">
+      <Navigation />
+      
+      <main className="container mx-auto px-4 py-16">
+        <div className="text-center mb-12">
+          <motion.h1 
+            className="text-4xl font-bold text-gray-900 mb-4"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+          >
+            AI Content Accuracy Detector
+          </motion.h1>
+          <motion.p 
+            className="text-lg text-gray-600 max-w-2xl mx-auto"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+          >
+            Paste AI-generated content below and get an automated accuracy analysis with detailed reasoning
+          </motion.p>
+        </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Question Input Section */}
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.6, delay: 0.1 }}
-        >
-          <Card className="shadow-custom-md">
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Brain className="h-5 w-5" />
-                <span>Submit Your Question</span>
-              </CardTitle>
-              <CardDescription>
-                Enter an educational question to receive an AI-generated response for accuracy testing.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Textarea
-                placeholder="Example: What is the capital of France and what is its population?"
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                className="min-h-[120px]"
-              />
-              <Button 
-                onClick={handleSubmitQuestion}
-                disabled={isLoading || !question.trim()}
-                className="w-full gradient-primary"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Generating Response...
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4 mr-2" />
-                    Get AI Response
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* AI Response Section */}
-        <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.6, delay: 0.2 }}
-        >
-          <Card className="shadow-custom-md">
-            <CardHeader>
-              <CardTitle>AI Response</CardTitle>
-              <CardDescription>
-                Review the AI-generated response for accuracy and completeness.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {aiResponse ? (
-                <div className="space-y-4">
-                  <div className="p-4 bg-muted/50 rounded-lg border">
-                    <p className="text-sm leading-relaxed">{aiResponse}</p>
-                  </div>
-                  <Badge variant="secondary" className="w-fit">
-                    <Clock className="h-3 w-3 mr-1" />
-                    Generated just now
-                  </Badge>
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Brain className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Submit a question to see the AI response here.</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-      </div>
-
-      {/* Accuracy Assessment Section */}
-      {aiResponse && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.3 }}
-        >
-          <Card className="shadow-custom-md">
-            <CardHeader>
-              <CardTitle>Accuracy Assessment</CardTitle>
-              <CardDescription>
-                Rate the accuracy of the AI response and provide your analysis.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Accuracy Rating */}
-              <div className="space-y-3">
-                <h3 className="font-semibold text-foreground">Overall Accuracy Rating</h3>
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                  {accuracyOptions.map((option) => {
-                    const Icon = option.icon;
-                    const isSelected = accuracyRating === option.value;
-                    
-                    return (
-                      <motion.div
-                        key={option.value}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <Button
-                          variant={isSelected ? "default" : "outline"}
-                          className={`h-auto p-4 flex flex-col items-center space-y-2 transition-smooth ${
-                            isSelected ? "ring-2 ring-primary" : ""
-                          }`}
-                          onClick={() => handleAccuracyRating(option.value)}
-                        >
-                          <Icon className="h-5 w-5" />
-                          <span className="text-xs font-medium text-center">
-                            {option.label}
-                          </span>
-                        </Button>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Notes Section */}
-              <div className="space-y-3">
-                <h3 className="font-semibold text-foreground">Analysis Notes</h3>
+        <div className="max-w-4xl mx-auto">
+          {/* Content Input Section */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="mb-8"
+          >
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Brain className="h-5 w-5" />
+                  AI-Generated Content Analysis
+                </CardTitle>
+                <CardDescription>
+                  Paste the AI-generated content you want to analyze for accuracy and reliability
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
                 <Textarea
-                  placeholder="Describe any inaccuracies, missing information, or areas for improvement..."
-                  value={accuracyNotes}
-                  onChange={(e) => setAccuracyNotes(e.target.value)}
-                  className="min-h-[100px]"
+                  placeholder="Paste AI-generated content here... (e.g., educational explanations, facts, research summaries)"
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  className="min-h-[160px]"
                 />
-              </div>
+                <Button 
+                  onClick={handleAnalyzeContent}
+                  disabled={loading || !content.trim()}
+                  className="w-full"
+                  size="lg"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Analyzing Content...
+                    </>
+                  ) : (
+                    <>
+                      <Search className="h-4 w-4 mr-2" />
+                      Analyze Content Accuracy
+                    </>
+                  )}
+                </Button>
+                {error && (
+                  <div className="text-red-600 text-sm mt-2 p-3 bg-red-50 rounded-lg">
+                    {error}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
 
-              <Button 
-                onClick={handleSaveResults}
-                className="w-full gradient-primary"
-                disabled={accuracyRating === null}
-              >
-                Save Assessment Results
-              </Button>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
+          {/* Analysis Results Section */}
+          {analysisResult && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.4 }}
+              className="space-y-6"
+            >
+              {/* Overall Verdict */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Brain className="h-5 w-5" />
+                    Overall Analysis Result
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      {getVerdictIcon(analysisResult.overall_verdict)}
+                      <div>
+                        <Badge className={getVerdictColor(analysisResult.overall_verdict)}>
+                          {analysisResult.overall_verdict.replace('_', ' ').toUpperCase()}
+                        </Badge>
+                        <p className="text-sm text-gray-600 mt-1">
+                          Educational Reliability: <span className="font-medium">{analysisResult.educational_reliability}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-primary">{analysisResult.confidence_score}%</div>
+                      <div className="text-sm text-gray-600">Confidence</div>
+                    </div>
+                  </div>
+                  <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">{analysisResult.summary}</p>
+                </CardContent>
+              </Card>
+
+              {/* Detailed Analysis Steps */}
+              <div className="space-y-4">
+                <h3 className="text-xl font-semibold text-gray-900">Detailed Analysis Steps</h3>
+                {analysisResult.analysis_steps.map((step, index) => (
+                  <motion.div
+                    key={step.step_number}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: 0.1 * index }}
+                  >
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="flex items-center gap-3 text-lg">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold">
+                            {step.step_number}
+                          </div>
+                          {step.title}
+                          {getVerdictIcon(step.verdict)}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <Badge className={getVerdictColor(step.verdict)}>
+                          {step.verdict.replace('_', ' ').toUpperCase()}
+                        </Badge>
+                        
+                        <p className="text-gray-700">{step.explanation}</p>
+                        
+                        {step.issues_found.length > 0 && (
+                          <div>
+                            <h4 className="font-medium text-gray-900 mb-2">Issues Found:</h4>
+                            <ul className="space-y-1">
+                              {step.issues_found.map((issue, issueIndex) => (
+                                <li key={issueIndex} className="text-red-600 text-sm flex items-start gap-2">
+                                  <XCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                  {issue}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        
+                        {step.suggested_correction && (
+                          <div className="bg-blue-50 p-3 rounded-lg">
+                            <h4 className="font-medium text-blue-900 mb-1">Suggested Correction:</h4>
+                            <p className="text-blue-800 text-sm">{step.suggested_correction}</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </div>
+      </main>
+
+      <Footer />
     </div>
   );
 };
