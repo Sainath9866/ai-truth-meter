@@ -4,88 +4,80 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle, XCircle, AlertCircle, Loader2, Search, Brain } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CheckCircle, XCircle, AlertCircle, Loader2, Search, Brain, Zap } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
-import { supabase } from "@/integrations/supabase/client";
-import { z } from "zod";
+import { ProgressPopup } from "@/components/ProgressPopup";
+import { AnalysisResults } from "@/components/AnalysisResults";
+import { analyzeContent, saveAnalysisToHistory, AnalysisResult, AnalysisHistory } from "@/lib/claude-api";
 
-const AnalysisStepSchema = z.object({
-  step_number: z.number(),
-  title: z.string(),
-  verdict: z.enum(["accurate", "partially_accurate", "inaccurate", "unclear"]),
-  explanation: z.string(),
-  issues_found: z.array(z.string()),
-  suggested_correction: z.string().optional()
-});
-
-const AnalysisResultSchema = z.object({
-  overall_verdict: z.enum(["accurate", "partially_accurate", "inaccurate"]),
-  confidence_score: z.number().min(0).max(100),
-  analysis_steps: z.array(AnalysisStepSchema),
-  summary: z.string(),
-  educational_reliability: z.enum(["high", "medium", "low"])
-});
-
-type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
+// Popular AI models for selection
+const AI_MODELS = [
+  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet", description: "Anthropic's latest model" },
+  { id: "gpt-4o", name: "GPT-4o", description: "OpenAI's flagship model" },
+  { id: "gpt-4", name: "GPT-4", description: "OpenAI's advanced model" },
+  { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", description: "Google's most capable model" },
+  { id: "mistral-large", name: "Mistral Large", description: "Mistral's premium model" },
+  { id: "llama-3-70b", name: "LLaMA 3 70B", description: "Meta's large language model" }
+];
 
 const Test = () => {
   const [content, setContent] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showProgress, setShowProgress] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
 
   const handleAnalyzeContent = async () => {
-    if (!content.trim()) return;
+    if (!content.trim() || !selectedModel) return;
 
     setLoading(true);
     setError("");
     setAnalysisResult(null);
+    setShowProgress(true);
+    setCurrentStep(1);
     
     try {
-      const { data, error: functionError } = await supabase.functions.invoke('analyze-content', {
-        body: { content }
-      });
-
-      if (functionError) {
-        throw functionError;
+      // Simulate progress steps
+      const progressSteps = [1, 2, 3, 4];
+      for (const step of progressSteps) {
+        setCurrentStep(step);
+        await new Promise(resolve => setTimeout(resolve, 800)); // Simulate processing time
       }
 
-      const validatedResult = AnalysisResultSchema.parse(data);
-      setAnalysisResult(validatedResult);
+      const result = await analyzeContent({
+        content,
+        model: selectedModel
+      });
+
+      setAnalysisResult(result);
+
+      // Save to history
+      const historyEntry: AnalysisHistory = {
+        id: Date.now().toString(),
+        model: selectedModel,
+        content: content.substring(0, 200) + (content.length > 200 ? '...' : ''),
+        result,
+        timestamp: Date.now(),
+        cost: 0.01 // Estimated cost
+      };
+
+      saveAnalysisToHistory(historyEntry);
+
     } catch (err) {
       console.error('Analysis error:', err);
       setError(err instanceof Error ? err.message : 'Failed to analyze content');
     } finally {
       setLoading(false);
+      setShowProgress(false);
+      setCurrentStep(1);
     }
   };
 
-  const getVerdictIcon = (verdict: string) => {
-    switch (verdict) {
-      case "accurate":
-        return <CheckCircle className="h-5 w-5 text-green-600" />;
-      case "partially_accurate":
-        return <AlertCircle className="h-5 w-5 text-yellow-600" />;
-      case "inaccurate":
-        return <XCircle className="h-5 w-5 text-red-600" />;
-      default:
-        return <AlertCircle className="h-5 w-5 text-gray-600" />;
-    }
-  };
-
-  const getVerdictColor = (verdict: string) => {
-    switch (verdict) {
-      case "accurate":
-        return "bg-green-50 border-green-200 text-green-800";
-      case "partially_accurate":
-        return "bg-yellow-50 border-yellow-200 text-yellow-800";
-      case "inaccurate":
-        return "bg-red-50 border-red-200 text-red-800";
-      default:
-        return "bg-gray-50 border-gray-200 text-gray-800";
-    }
-  };
+  const selectedModelInfo = AI_MODELS.find(model => model.id === selectedModel);
 
   return (
     <div className="min-h-screen bg-background">
@@ -99,7 +91,7 @@ const Test = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
           >
-            AI Content Accuracy Detector
+            AI Truth Meter
           </motion.h1>
           <motion.p 
             className="text-lg text-gray-600 max-w-2xl mx-auto"
@@ -107,156 +99,130 @@ const Test = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1 }}
           >
-            Paste AI-generated content below and get an automated accuracy analysis with detailed reasoning
+            Select the AI model and paste AI-generated content below to get an automated accuracy analysis with detailed reasoning
           </motion.p>
         </div>
 
         <div className="max-w-4xl mx-auto">
-          {/* Content Input Section */}
+          {/* Model Selection and Content Input Section */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.2 }}
             className="mb-8"
           >
-            <Card>
+            <Card className="shadow-lg border-2 border-primary/10">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Brain className="h-5 w-5" />
-                  AI-Generated Content Analysis
+                  <Zap className="h-5 w-5 text-primary" />
+                  AI Content Analysis
                 </CardTitle>
                 <CardDescription>
-                  Paste the AI-generated content you want to analyze for accuracy and reliability
+                  Select the AI model and paste the content you want to analyze for accuracy and reliability
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <Textarea
-                  placeholder="Paste AI-generated content here... (e.g., educational explanations, facts, research summaries)"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  className="min-h-[160px]"
-                />
+              <CardContent className="space-y-6">
+                {/* Model Selection */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Select AI Model *
+                  </label>
+                  <Select value={selectedModel} onValueChange={setSelectedModel}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Choose the AI model that generated this content" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AI_MODELS.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          <div className="flex flex-col">
+                            <span className="font-medium">{model.name}</span>
+                            <span className="text-sm text-gray-500">{model.description}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedModelInfo && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex items-center gap-2 p-3 bg-primary/5 rounded-lg border border-primary/20"
+                    >
+                      <Brain className="h-4 w-4 text-primary" />
+                      <span className="text-sm text-primary font-medium">
+                        Selected: {selectedModelInfo.name}
+                      </span>
+                    </motion.div>
+                  )}
+                </div>
+
+                {/* Content Input */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    AI-Generated Content *
+                  </label>
+                  <Textarea
+                    placeholder="Paste AI-generated content here... (e.g., educational explanations, facts, research summaries)"
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    className="min-h-[160px] resize-none"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Content will be automatically truncated to optimize API costs</span>
+                    <span>{content.length} characters</span>
+                  </div>
+                </div>
+
+                {/* Analyze Button */}
                 <Button 
                   onClick={handleAnalyzeContent}
-                  disabled={loading || !content.trim()}
-                  className="w-full"
+                  disabled={loading || !content.trim() || !selectedModel}
+                  className="w-full h-12 text-lg"
                   size="lg"
                 >
                   {loading ? (
                     <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      <Loader2 className="h-5 w-5 mr-2 animate-spin" />
                       Analyzing Content...
                     </>
                   ) : (
                     <>
-                      <Search className="h-4 w-4 mr-2" />
+                      <Search className="h-5 w-5 mr-2" />
                       Analyze Content Accuracy
                     </>
                   )}
                 </Button>
+
                 {error && (
-                  <div className="text-red-600 text-sm mt-2 p-3 bg-red-50 rounded-lg">
-                    {error}
-                  </div>
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-red-600 text-sm p-4 bg-red-50 rounded-lg border border-red-200"
+                  >
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4" />
+                      <span className="font-medium">Analysis Error</span>
+                    </div>
+                    <p className="mt-1">{error}</p>
+                  </motion.div>
                 )}
               </CardContent>
             </Card>
           </motion.div>
 
           {/* Analysis Results Section */}
-          {analysisResult && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-              className="space-y-6"
-            >
-              {/* Overall Verdict */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Brain className="h-5 w-5" />
-                    Overall Analysis Result
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      {getVerdictIcon(analysisResult.overall_verdict)}
-                      <div>
-                        <Badge className={getVerdictColor(analysisResult.overall_verdict)}>
-                          {analysisResult.overall_verdict.replace('_', ' ').toUpperCase()}
-                        </Badge>
-                        <p className="text-sm text-gray-600 mt-1">
-                          Educational Reliability: <span className="font-medium">{analysisResult.educational_reliability}</span>
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-primary">{analysisResult.confidence_score}%</div>
-                      <div className="text-sm text-gray-600">Confidence</div>
-                    </div>
-                  </div>
-                  <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">{analysisResult.summary}</p>
-                </CardContent>
-              </Card>
-
-              {/* Detailed Analysis Steps */}
-              <div className="space-y-4">
-                <h3 className="text-xl font-semibold text-gray-900">Detailed Analysis Steps</h3>
-                {analysisResult.analysis_steps.map((step, index) => (
-                  <motion.div
-                    key={step.step_number}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, delay: 0.1 * index }}
-                  >
-                    <Card>
-                      <CardHeader className="pb-3">
-                        <CardTitle className="flex items-center gap-3 text-lg">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold">
-                            {step.step_number}
-                          </div>
-                          {step.title}
-                          {getVerdictIcon(step.verdict)}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <Badge className={getVerdictColor(step.verdict)}>
-                          {step.verdict.replace('_', ' ').toUpperCase()}
-                        </Badge>
-                        
-                        <p className="text-gray-700">{step.explanation}</p>
-                        
-                        {step.issues_found.length > 0 && (
-                          <div>
-                            <h4 className="font-medium text-gray-900 mb-2">Issues Found:</h4>
-                            <ul className="space-y-1">
-                              {step.issues_found.map((issue, issueIndex) => (
-                                <li key={issueIndex} className="text-red-600 text-sm flex items-start gap-2">
-                                  <XCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                                  {issue}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        
-                        {step.suggested_correction && (
-                          <div className="bg-blue-50 p-3 rounded-lg">
-                            <h4 className="font-medium text-blue-900 mb-1">Suggested Correction:</h4>
-                            <p className="text-blue-800 text-sm">{step.suggested_correction}</p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                ))}
-              </div>
-            </motion.div>
+          {analysisResult && selectedModel && (
+            <AnalysisResults result={analysisResult} model={selectedModel} />
           )}
         </div>
       </main>
+
+      {/* Progress Popup */}
+      <ProgressPopup 
+        isOpen={showProgress} 
+        currentStep={currentStep} 
+        onComplete={() => setShowProgress(false)} 
+      />
 
       <Footer />
     </div>
